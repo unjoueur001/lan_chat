@@ -1,0 +1,1066 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+import json
+import socket
+import threading
+import queue
+import time
+import hashlib
+import logging
+import re
+import base64
+import math
+import random
+import webbrowser
+import platform
+import subprocess
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+
+# Logging configuration
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("LANChat")
+
+# --- Encodage UTF-8 & Locale ---
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+try:
+    import locale as _loc
+    _locales = ["fr_FR.UTF-8", "fr_FR.utf8", "en_US.UTF-8", "C.UTF-8"]
+    for _loc_name in _locales:
+        try:
+            _loc.setlocale(_loc.LC_ALL, _loc_name)
+            break
+        except Exception:
+            continue
+except Exception:
+    pass
+
+if hasattr(os, "environ"):
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+# --- PyAudio (optionnel) ---
+try:
+    import pyaudio
+    AUDIO_OK = True
+except ImportError:
+    AUDIO_OK = False
+
+# --- Constantes Globales ---
+APP_NAME = "LANChat"
+VERSION = "v1.1.2.4"
+APP_SECRET = b"LANChat_Secret_Key_2026"
+UDP_PORT = 50000
+TCP_PORT = 50001
+ANNOUNCE_EVERY = 3
+SCAN_TIME = 2.5
+SLOTS_FILE = "lanchat_slots.dat"
+COMPTES_FILE = "lanchat_accounts.json"
+SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+# Thème Visuel Catppuccin / Modern Dark
+C_BG = "#1e1e2e"
+C_BG2 = "#181825"
+C_SURF2 = "#313244"
+C_INP = "#45475a"
+C_TEXT = "#cdd6f4"
+C_SUB = "#bac2de"
+C_DIM = "#a6adc8"
+C_BLUE = "#89b4fa"
+C_GREEN = "#a6e3a1"
+C_RED = "#f38ba8"
+C_PURPLE = "#cba6f7"
+C_PINK = "#f5c2e7"
+C_YELLOW = "#f9e2af"
+C_TEAL = "#94e2d5"
+C_ACCENT = "#fab387"
+FONT = "Segoe UI" if platform.system() == "Windows" else "Helvetica"
+
+# --- Données & Cosmétiques ---
+COULEURS = {
+    "defaut": {"nom": "Blanc Classic", "hex": "#cdd6f4", "prix": 0},
+    "bleu": {"nom": "Bleu Cyan", "hex": "#89b4fa", "prix": 50},
+    "vert": {"nom": "Vert Émeraude", "hex": "#a6e3a1", "prix": 50},
+    "rouge": {"nom": "Rouge Rubis", "hex": "#f38ba8", "prix": 50},
+    "violet": {"nom": "Violet Améthyste", "hex": "#cba6f7", "prix": 80},
+    "or": {"nom": "Or Impérial", "hex": "#f9e2af", "prix": 150},
+    "arc": {"nom": "Arc-en-ciel Animated", "hex": "#f5c2e7", "anime": True, "prix": 300},
+    "galaxy": {"nom": "Galaxie Néon", "hex": "#b4befe", "anime": True, "prix": 350},
+}
+COULEURS_DEFAUT = "defaut"
+
+BADGES = {
+    "recrue": {"nom": "Recrue", "emoji": "🌱", "prix": 0},
+    "habitue": {"nom": "Habitué", "emoji": "⭐", "prix": 50},
+    "expert": {"nom": "Expert LAN", "emoji": "🔥", "prix": 100},
+    "vip": {"nom": "VIP", "emoji": "👑", "prix": 200},
+    "legend": {"nom": "Légende", "emoji": "💎", "prix": 500},
+    "gamer": {"nom": "Gamer", "emoji": "🎮", "prix": 80},
+    "dev": {"nom": "Développeur", "emoji": "💻", "prix": 120},
+}
+BADGE_DEFAUT = "recrue"
+
+DESC_BADGES = {
+    "recrue": "Nouveau membre du réseau",
+    "habitue": "Membre actif du chat",
+    "expert": "Expert incontesté du LAN",
+    "vip": "Statut privilégié sur le serveur",
+    "legend": "Légende vivante de la communauté",
+    "gamer": "Passionné de jeux vidéo",
+    "dev": "Créateur de code et de projets",
+}
+
+TITRES = {
+    "membre": {"nom": "Nouveau Venu", "prix": 0},
+    "bavard": {"nom": "Bavard du Réseau", "prix": 60},
+    "seigneur": {"nom": "Seigneur des Salons", "prix": 150},
+    "cyber": {"nom": "Cyber Citoyen", "prix": 200},
+}
+TITRE_DEFAUT = "membre"
+
+AVATARS_PREF = {
+    "defaut": {"emoji": "🧑", "nom": "Humain", "prix": 0},
+    "renard": {"emoji": "🦊", "nom": "Renard", "prix": 100},
+    "panda": {"emoji": "🐼", "nom": "Panda", "prix": 120},
+    "frog": {"emoji": "🐸", "nom": "Grenouille", "prix": 90},
+    "singe": {"emoji": "🐵", "nom": "Singe", "prix": 90},
+    "robot": {"emoji": "🤖", "nom": "Robot", "prix": 150},
+}
+AVATAR_DEFAUT = "defaut"
+
+CADRES = {
+    "aucun": {"nom": "Aucun", "symbole": "", "prix": 0},
+    "simple": {"nom": "Simple", "symbole": "▬", "prix": 0},
+    "etoile": {"nom": "Étoile", "symbole": "✪", "prix": 50},
+    "couronne": {"nom": "Couronne", "symbole": "♚", "prix": 120},
+    "foudre": {"nom": "Foudre", "symbole": "⚡", "prix": 100},
+    "diamant": {"nom": "Diamant", "symbole": "◆", "prix": 150},
+}
+CADRE_DEFAUT = "simple"
+
+FONDS_PROFIL = {
+    "defaut": {"nom": "Défaut", "couleur": None, "prix": 0},
+    "bleu": {"nom": "Bleu Glacier", "couleur": "#1e1e2e", "prix": 0},
+    "violet": {"nom": "Violet Nuit", "couleur": "#2a1e3e", "prix": 60},
+    "vert": {"nom": "Vert Forêt", "couleur": "#1e2e1e", "prix": 60},
+}
+
+EMOJIS = {
+    "Sourires": ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘"],
+    "Nourriture": ["🍕", "🍔", "🍟", "🌮", "🍩", "🎂", "🍓", "🍉", "🥑", "🍿", "🍪", "🥤", "🍣", "🍜"],
+    "Drapeaux": ["🇫🇷", "🇬🇧", "🇺🇸", "🇪🇸", "🇮🇹", "🇩🇪", "🇯🇵", "🇨🇦", "🇧🇪", "🇨🇭"],
+    "Activités": ["⚽", "🏀", "🎮", "🎧", "🎨", "📸", "🎬", "🎸", "🎤", "🎵", "🥁", "🎲", "🎯"],
+    "Symboles": ["💯", "✅", "❌", "❓", "❗", "💥", "💫", "💬", "✨", "🔥", "⭐", "💎"],
+}
+
+SALONS_DEFAUT = [
+    {"nom": "général", "type": "texte", "desc": "Discussion générale"},
+    {"nom": "annonces", "type": "texte", "desc": "Annonces importantes"},
+    {"nom": "blabla", "type": "texte", "desc": "Pour parler de tout et de rien"},
+    {"nom": "vocal", "type": "vocal", "desc": "Salon vocal principal"},
+]
+
+# --- Helpers Cosmétiques ---
+def couleur_hex(cid): return COULEURS.get(cid, COULEURS[COULEURS_DEFAUT])["hex"]
+def couleur_anime(cid): return COULEURS.get(cid, {}).get("anime", False)
+def badge_emoji(bid): return BADGES.get(bid, BADGES[BADGE_DEFAUT])["emoji"]
+def titre_nom(tid): return TITRES.get(tid, TITRES[TITRE_DEFAUT])["nom"]
+def avatar_emoji(aid): return AVATARS_PREF.get(aid, AVATARS_PREF[AVATAR_DEFAUT])["emoji"]
+def cadre_symbole(cid): return CADRES.get(cid, CADRES[CADRE_DEFAUT])["symbole"]
+
+# --- Progression & XP ---
+def _paliers():
+    seuils = [0]; step = 100; total = 0
+    for _ in range(200):
+        total += step; seuils.append(total); step = int(step * 1.15)
+    return seuils
+_SEUILS = _paliers()
+
+def niveau_from_xp(xp):
+    niv = 0
+    for i in range(1, len(_SEUILS)):
+        if xp >= _SEUILS[i]: niv = i
+        else: break
+    return niv, _SEUILS[min(niv+1, len(_SEUILS)-1)] - xp
+
+def info_niveau(xp):
+    niv = 0
+    for i in range(1, len(_SEUILS)):
+        if xp >= _SEUILS[i]: niv = i
+        else: break
+    next_seuil = _SEUILS[min(niv+1, len(_SEUILS)-1)]
+    cur_seuil = _SEUILS[niv]
+    return niv, xp - cur_seuil, max(1, next_seuil - cur_seuil)
+
+# --- Chiffrement & Réseau Helpers ---
+def _xor_cipher(data: bytes, key: bytes) -> bytes:
+    return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+
+def _chiffrer_json(obj, key: bytes = None) -> bytes:
+    if key is None: key = APP_SECRET
+    raw = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+    salt = os.urandom(8)
+    k = hashlib.sha256(key + salt).digest()
+    enc = _xor_cipher(raw, k)
+    return base64.b85encode(salt + enc)
+
+def _dechiffrer_json(blob: bytes, key: bytes = None):
+    if key is None: key = APP_SECRET
+    try:
+        raw = base64.b85decode(blob)
+        salt = raw[:8]; enc = raw[8:]
+        k = hashlib.sha256(key + salt).digest()
+        data = _xor_cipher(enc, k)
+        return json.loads(data.decode("utf-8"))
+    except Exception:
+        return None
+
+def make_msg(t, **kw):
+    kw["type"] = t
+    return (json.dumps(kw, ensure_ascii=False) + "\n").encode("utf-8")
+
+def recv_lines(sock, callback):
+    buf = ""
+    while True:
+        try:
+            data = sock.recv(4096)
+            if not data: break
+            buf += data.decode("utf-8", errors="replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if line:
+                    try:
+                        msg = json.loads(line)
+                        callback(msg)
+                    except json.JSONDecodeError: pass
+        except OSError:
+            break
+
+def make_udp(t, **kw):
+    kw["type"] = t
+    return json.dumps(kw, ensure_ascii=False).encode("utf-8")
+
+def parse_udp(data):
+    try:
+        return json.loads(data.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+def local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def profil_public(compte):
+    if not compte: return {}
+    return {
+        "pseudo": compte.get("pseudo", "Inconnu"),
+        "xp": compte.get("xp", 0),
+        "coins": compte.get("coins", 0),
+        "msgs": compte.get("msgs", 0),
+        "appels": compte.get("appels", 0),
+        "couleur": compte.get("equip", {}).get("couleur", COULEURS_DEFAUT),
+        "badge": compte.get("equip", {}).get("badge", BADGE_DEFAUT),
+        "titre": compte.get("equip", {}).get("titre", TITRE_DEFAUT),
+        "avatar_emoji": compte.get("avatar_emoji", "🧑"),
+        "cadre": compte.get("equip", {}).get("cadre", CADRE_DEFAUT),
+        "fond": compte.get("equip", {}).get("fond", "defaut"),
+        "bio": compte.get("bio", ""),
+        "liens": compte.get("liens", []),
+        "en_ligne": True
+    }
+
+# --- Audio Session ---
+class AudioSession:
+    def __init__(self):
+        self.actif = False
+        self.pa = None
+        self.in_stream = None
+        self.out_stream = None
+        self.sock = None
+        self.peer = None
+        self.mute = False
+
+    def allouer(self):
+        if not AUDIO_OK or self.actif: return
+        try:
+            self.pa = pyaudio.PyAudio()
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.bind(("0.0.0.0", 0))
+            self.actif = True
+        except Exception as e:
+            log.warning(f"AudioSession Error: {e}")
+
+    def mon_port(self):
+        return self.sock.getsockname()[1] if self.sock else None
+
+    def basculer_mute(self):
+        self.mute = not self.mute
+        return self.mute
+
+    def arreter(self):
+        self.actif = False
+        for s in (self.in_stream, self.out_stream):
+            try:
+                if s: s.stop_stream(); s.close()
+            except Exception: pass
+        try:
+            if self.pa: self.pa.terminate()
+        except Exception: pass
+        try:
+            if self.sock: self.sock.close()
+        except Exception: pass
+        self.in_stream = self.out_stream = self.sock = self.pa = None
+        self.peer = None
+
+# --- Sons & Beeps ---
+_SONS_PERSO = {"sonnerie": "", "notif": "", "envoi": "", "connexion": "", "erreur": ""}
+
+def _jouer_fichier(path):
+    if not path or not os.path.isfile(path): return False
+    sysname = platform.system()
+    try:
+        if sysname == "Windows":
+            import winsound
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            return True
+        elif sysname == "Darwin":
+            subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        else:
+            for lecteur in ("aplay", "mpv", "ffplay", "paplay"):
+                try:
+                    subprocess.Popen([lecteur, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+                except OSError: continue
+    except Exception: pass
+    return False
+
+def beep(freq=880, duree=120):
+    try:
+        import winsound
+        winsound.Beep(freq, duree)
+    except Exception: pass
+
+def son_envoi(compte=None):
+    if compte and compte.get("son_envoi"):
+        if _jouer_fichier(compte["son_envoi"]): return
+    beep(600, 50)
+
+# --- Effets Dégradés ---
+RAINBOW = ["#f38ba8", "#fab387", "#f9e2af", "#a6e3a1", "#94e2d5", "#89b4fa", "#cba6f7"]
+GRADIENT_NEON = ["#89b4fa", "#b4befe", "#cba6f7", "#f5c2e7", "#f38ba8", "#fab387", "#f9e2af", "#a6e3a1"]
+SPARKLES = ["✦", "✧", "★", "✵", "✶"]
+
+def hex_to_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+def rgb_to_hex(r, g, b):
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+def _gradient_hex(c1, c2, steps=20):
+    r1, g1, b1 = hex_to_rgb(c1)
+    r2, g2, b2 = hex_to_rgb(c2)
+    out = []
+    for i in range(steps):
+        t = i / max(1, steps-1)
+        te = 0.5 - 0.5 * (1 - t) ** 2
+        out.append(rgb_to_hex(int(r1+(r2-r1)*te), int(g1+(g2-g1)*te), int(b1+(b2-b1)*te)))
+    return out
+
+def _multi_gradient_hex(colors, steps=60):
+    if len(colors) < 2: return colors * steps
+    out = []
+    seg = max(2, steps // max(1, len(colors)-1))
+    for i in range(len(colors)-1):
+        s = seg if i < len(colors)-2 else seg + steps - seg*(len(colors)-1)
+        out.extend(_gradient_hex(colors[i], colors[i+1], s))
+    return out[:steps]
+
+# --- Gestionnaire de Comptes Locaux ---
+class GestionnaireCompte:
+    def __init__(self, fichier=COMPTES_FILE):
+        self.fichier = fichier
+        self.comptes = self.charger()
+
+    def charger(self):
+        if os.path.exists(self.fichier):
+            try:
+                with open(self.fichier, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception: return {}
+        return {}
+
+    def sauver(self):
+        try:
+            with open(self.fichier, "w", encoding="utf-8") as f:
+                json.dump(self.comptes, f, ensure_ascii=False, indent=2)
+        except Exception as e: log.warning(f"Sauvegarde compte échec: {e}")
+
+    def authentifier(self, pseudo, mdp):
+        if pseudo in self.comptes:
+            h = hashlib.sha256(mdp.encode()).hexdigest()
+            if self.comptes[pseudo].get("mdp") == h:
+                return self.comptes[pseudo]
+        return None
+
+    def creer(self, pseudo, mdp):
+        if pseudo in self.comptes: return None
+        h = hashlib.sha256(mdp.encode()).hexdigest()
+        compte = {
+            "pseudo": pseudo,
+            "mdp": h,
+            "xp": 0,
+            "coins": 100,
+            "msgs": 0,
+            "appels": 0,
+            "avatar_emoji": "🧑",
+            "bio": "Salut ! J'utilise LANChat.",
+            "liens": [],
+            "amis": [],
+            "equip": {"couleur": COULEURS_DEFAUT, "badge": BADGE_DEFAUT, "titre": TITRE_DEFAUT, "cadre": CADRE_DEFAUT, "fond": "defaut"},
+            "possede": {"couleurs": [COULEURS_DEFAUT], "badges": [BADGE_DEFAUT], "titres": [TITRE_DEFAUT], "cadres": [CADRE_DEFAUT]}
+        }
+        self.comptes[pseudo] = compte
+        self.sauver()
+        return compte
+
+# --- APPLICATION PRINCIPALE ---
+class LANChatApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title(f"{APP_NAME} {VERSION}")
+        self.root.geometry("850x600")
+        self.root.configure(bg=C_BG)
+
+        self.gc = GestionnaireCompte()
+        self.compte = None
+        self.pseudo = ""
+        self.ui_queue = queue.Queue()
+        self.running = True
+
+        self.sock = None
+        self.udp_sock = None
+        self.tcp_server = None
+        self.mode = None  # "host" ou "client"
+        self.clients = []
+        self.clients_lock = threading.Lock()
+        self.pseudo_to_sock = {}
+        self.client_ips = {}
+        self.profils = {}
+        self.salons = list(SALONS_DEFAUT)
+        self.salon_courant = "général"
+        self.vocal_actif = False
+        self.nb_connectes = 0
+        self.cible = None
+
+        self.audio = AudioSession()
+        self._ecran_auth()
+        self._poll()
+
+    # --- UI Polish & Helpers ---
+    def _reset_frame(self):
+        if hasattr(self, "frame"): self.frame.destroy()
+        self.frame = tk.Frame(self.root, bg=C_BG)
+        self.frame.pack(fill="both", expand=True)
+
+    def _entree_styler(self, e):
+        e.config(font=(FONT, 12), bg=C_INP, fg=C_TEXT, insertbackground=C_TEXT, relief="flat", bd=0)
+
+    def _btn_styler(self, b, bg=C_BLUE, fg=C_BG):
+        b.config(font=(FONT, 10, "bold"), bg=bg, fg=fg, relief="flat", cursor="hand2", bd=0, padx=10, pady=5)
+
+    def _fond_anime(self, parent, height=60):
+        canvas = tk.Canvas(parent, height=height, highlightthickness=0, bd=0)
+        canvas.pack(fill="x")
+        try:
+            base = _multi_gradient_hex(GRADIENT_NEON, 120)
+            strips = []; n_strips = 80; offset = [0]
+            w = 850
+            sw = max(1, w / n_strips)
+            for i in range(n_strips + 2):
+                x = i * sw
+                c = base[i % len(base)]
+                rid = canvas.create_rectangle(x, 0, x + sw + 1, height, fill=c, outline="", tags="fond")
+                strips.append(rid)
+
+            def anim():
+                if not canvas.winfo_exists(): return
+                for i, rid in enumerate(strips):
+                    c = base[(offset[0] + i) % len(base)]
+                    canvas.itemconfig(rid, fill=c)
+                offset[0] = (offset[0] + 1) % len(base)
+                self.root.after(100, anim)
+            anim()
+        except Exception as e:
+            log.warning(f"Fond animé indisponible: {e}")
+            canvas.config(bg=C_BG2)
+        return canvas
+
+    def _titre_anime(self, parent, texte, couleur=C_BLUE, font_size=20):
+        lbl = tk.Label(parent, text=texte, font=(FONT, font_size, "bold"), fg=couleur, bg=C_BG)
+        lbl.pack(pady=4)
+        return lbl
+
+    # --- Polling Queue ---
+    def _poll(self):
+        try:
+            while True:
+                kind, *args = self.ui_queue.get_nowait()
+                self._handle(kind, args)
+        except queue.Empty: pass
+        self.root.after(80, self._poll)
+
+    def _handle(self, kind, args):
+        h = {
+            "msg": lambda: self.afficher_message(args[0], args[1]),
+            "sys": lambda: self.afficher_systeme(args[0]),
+            "err": lambda: self.afficher_erreur(args[0]),
+            "scan_progress": lambda: self._maj_chargement(args[0]),
+            "discovered": lambda: self._fin_scan(args[0]),
+            "connected": self._on_connecte,
+            "connect_fail": lambda: self._echec_connexion(args[0]),
+            "profil": lambda: self._maj_profil(args[0]),
+            "salons_init": lambda: self._init_salons(args[0]),
+            "salon_cree": lambda: self._on_salon_cree(args[0], args[1] if len(args)>1 else "texte", args[2] if len(args)>2 else ""),
+        }
+        f = h.get(kind)
+        if f: f()
+
+    # --- Écrans d'Authentification & Démarrage ---
+    def _ecran_auth(self):
+        self._reset_frame()
+        f = self.frame
+        self._fond_anime(f, height=60)
+        self._titre_anime(f, f"💬 {APP_NAME}", C_BLUE, 22)
+        tk.Label(f, text="Connexion au compte local", font=(FONT, 11), fg=C_SUB, bg=C_BG).pack(pady=(0, 10))
+
+        cadre = tk.Frame(f, bg=C_SURF2, padx=20, pady=20)
+        cadre.pack(padx=50, pady=10, fill="x")
+
+        self._auth_mode = tk.StringVar(value="login")
+
+        tk.Label(cadre, text="Pseudo", font=(FONT, 10), fg=C_SUB, bg=C_SURF2).pack(anchor="w")
+        self.ent_pseudo = tk.Entry(cadre); self._entree_styler(self.ent_pseudo)
+        self.ent_pseudo.pack(fill="x", pady=(2, 8))
+
+        tk.Label(cadre, text="Mot de passe", font=(FONT, 10), fg=C_SUB, bg=C_SURF2).pack(anchor="w")
+        self.ent_mdp = tk.Entry(cadre, show="•"); self._entree_styler(self.ent_mdp)
+        self.ent_mdp.pack(fill="x", pady=(2, 12))
+
+        btn_val = tk.Button(cadre, text="Se connecter", command=self._valider_auth)
+        self._btn_styler(btn_val, C_GREEN)
+        btn_val.pack(fill="x", pady=4)
+
+        btn_creer = tk.Button(cadre, text="Créer un compte", command=self._creer_compte_action)
+        self._btn_styler(btn_creer, C_BLUE)
+        btn_creer.pack(fill="x", pady=4)
+
+    def _valider_auth(self):
+        p = self.ent_pseudo.get().strip()
+        m = self.ent_mdp.get().strip()
+        if not p or not m:
+            messagebox.showwarning(APP_NAME, "Remplis tous les champs.")
+            return
+        c = self.gc.authentifier(p, m)
+        if c:
+            self.compte = c
+            self.pseudo = p
+            self._ecran_demarrage()
+        else:
+            messagebox.showerror(APP_NAME, "Pseudo ou mot de passe incorrect.")
+
+    def _creer_compte_action(self):
+        p = self.ent_pseudo.get().strip()
+        m = self.ent_mdp.get().strip()
+        if not p or not m:
+            messagebox.showwarning(APP_NAME, "Remplis tous les champs.")
+            return
+        c = self.gc.creer(p, m)
+        if c:
+            self.compte = c
+            self.pseudo = p
+            messagebox.showinfo(APP_NAME, "Compte créé avec succès !")
+            self._ecran_demarrage()
+        else:
+            messagebox.showerror(APP_NAME, "Ce pseudo existe déjà.")
+
+    def _ecran_demarrage(self):
+        self._reset_frame()
+        f = self.frame
+        self._fond_anime(f, height=50)
+        self._titre_anime(f, f"Bienvenue {self.pseudo} !", C_YELLOW, 18)
+
+        cadre = tk.Frame(f, bg=C_SURF2, padx=20, pady=20)
+        cadre.pack(padx=40, pady=20, fill="both", expand=True)
+
+        b1 = tk.Button(cadre, text="🖥️  Héberger une session LAN", command=self.demarrer_hote)
+        self._btn_styler(b1, C_BLUE); b1.pack(fill="x", pady=6)
+
+        b2 = tk.Button(cadre, text="🔍  Rejoindre une session (Auto)", command=self.demarrer_rejoindre)
+        self._btn_styler(b2, C_GREEN); b2.pack(fill="x", pady=6)
+
+        b3 = tk.Button(cadre, text="✍️  Rejoindre par IP", command=self.rejoindre_ip_manuel)
+        self._btn_styler(b3, C_INP, C_TEXT); b3.pack(fill="x", pady=6)
+
+        b4 = tk.Button(cadre, text="🛍️  Boutique & Cosmétiques", command=self.ouvrir_boutique)
+        self._btn_styler(b4, C_YELLOW, C_BG); b4.pack(fill="x", pady=6)
+
+        b5 = tk.Button(cadre, text="🚪  Déconnexion", command=self._deconnexion)
+        self._btn_styler(b5, C_RED, C_BG); b5.pack(fill="x", pady=(12, 0))
+
+    def _deconnexion(self):
+        self.compte = None
+        self.pseudo = ""
+        self._ecran_auth()
+
+    # --- Hébergement & Connexion ---
+    def demarrer_hote(self):
+        self.mode = "host"
+        self.salons = list(SALONS_DEFAUT)
+        self.salon_courant = "général"
+        threading.Thread(target=self._servir_tcp, daemon=True).start()
+        threading.Thread(target=self._servir_udp, daemon=True).start()
+        self._construire_interface_chat()
+        self.afficher_systeme(f"Serveur démarré sur {local_ip()}:{TCP_PORT}")
+
+    def _servir_tcp(self):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("0.0.0.0", TCP_PORT))
+            s.listen(10)
+            self.tcp_server = s
+            while self.running:
+                conn, addr = s.accept()
+                threading.Thread(target=self._gerer_client, args=(conn, addr), daemon=True).start()
+        except Exception as e:
+            log.warning(f"TCP Server Error: {e}")
+
+    def _gerer_client(self, conn, addr):
+        pseudo_client = None
+        def on_line(m):
+            nonlocal pseudo_client
+            t = m.get("type")
+            if t == "hello":
+                pseudo_client = m.get("pseudo", "Anonyme")
+                with self.clients_lock:
+                    self.clients.append(conn)
+                    self.pseudo_to_sock[pseudo_client] = conn
+                self.nb_connectes += 1
+                self.ui_queue.put(("sys", f"🟢 {pseudo_client} a rejoint le réseau !"))
+                conn.sendall(make_msg("salons_init", salons=self.salons))
+            elif t == "msg":
+                txt = m.get("text", "")
+                ps = m.get("pseudo", pseudo_client)
+                self.ui_queue.put(("msg", ps, txt))
+                self._diffuser(make_msg("msg", pseudo=ps, text=txt), except_=conn)
+            elif t == "salon_cree":
+                nom, typ, desc = m.get("nom"), m.get("type_salon"), m.get("desc")
+                self.salons.append({"nom": nom, "type": typ, "desc": desc})
+                self.ui_queue.put(("salon_cree", nom, typ, desc))
+                self._diffuser(make_msg("salon_cree", nom=nom, type_salon=typ, desc=desc), except_=conn)
+
+        recv_lines(conn, on_line)
+        with self.clients_lock:
+            if conn in self.clients: self.clients.remove(conn)
+            if pseudo_client in self.pseudo_to_sock: del self.pseudo_to_sock[pseudo_client]
+        if pseudo_client:
+            self.nb_connectes = max(0, self.nb_connectes - 1)
+            self.ui_queue.put(("sys", f"🔴 {pseudo_client} s'est déconnecté."))
+
+    def _diffuser(self, data, except_=None):
+        with self.clients_lock:
+            cibles = [c for c in self.clients if c is not except_]
+        for c in cibles:
+            try: c.sendall(data)
+            except OSError: pass
+
+    def _servir_udp(self):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.bind(("0.0.0.0", UDP_PORT))
+            self.udp_sock = s
+        except OSError: return
+        annonce = make_udp("announce", port=TCP_PORT, name=APP_NAME, host_pseudo=self.pseudo, version=VERSION)
+        while self.running:
+            try:
+                s.settimeout(1.0)
+                data, addr = s.recvfrom(4096)
+                msg = parse_udp(data)
+                if msg and msg.get("type") == "discover":
+                    s.sendto(annonce, addr)
+            except socket.timeout:
+                try: s.sendto(annonce, ("255.255.255.255", UDP_PORT))
+                except OSError: pass
+            except OSError: break
+
+    # --- Recherche Client ---
+    def demarrer_rejoindre(self):
+        self.mode = "client"
+        self._ecran_chargement("Recherche de salons sur le réseau LAN...")
+        threading.Thread(target=self._scan_reseau, daemon=True).start()
+
+    def _scan_reseau(self):
+        trouve = {}
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.bind(("0.0.0.0", UDP_PORT))
+            s.sendto(make_udp("discover"), ("255.255.255.255", UDP_PORT))
+        except OSError as e:
+            self.ui_queue.put(("connect_fail", f"Erreur scan : {e}"))
+            return
+        echeance = time.time() + SCAN_TIME
+        while time.time() < echeance:
+            try:
+                s.settimeout(0.4)
+                data, addr = s.recvfrom(4096)
+                msg = parse_udp(data)
+                if msg and msg.get("type") == "announce":
+                    cle = (addr[0], int(msg.get("port", TCP_PORT)))
+                    trouve[cle] = (msg.get("name", "Salon LAN"), msg.get("host_pseudo", "?"), msg.get("version", ""))
+                    self.ui_queue.put(("scan_progress", len(trouve)))
+            except socket.timeout: continue
+            except OSError: break
+        try: s.close()
+        except OSError: pass
+        self.ui_queue.put(("discovered", [(ip, port, nom, hp, v) for (ip, port), (nom, hp, v) in trouve.items()]))
+
+    def _ecran_chargement(self, txt):
+        self._reset_frame()
+        f = self.frame
+        self.lbl_chargement = tk.Label(f, text=txt, font=(FONT, 12), fg=C_TEXT, bg=C_BG)
+        self.lbl_chargement.pack(pady=40)
+        self.lbl_compteur = tk.Label(f, text="0 salon trouvé", font=(FONT, 10), fg=C_GREEN, bg=C_BG)
+        self.lbl_compteur.pack(pady=10)
+        b = tk.Button(f, text="Annuler", command=self._ecran_demarrage)
+        self._btn_styler(b, C_INP, C_TEXT); b.pack()
+
+    def _maj_chargement(self, n):
+        if hasattr(self, "lbl_compteur"):
+            self.lbl_compteur.config(text=f"{n} salon(s) trouvé(s)")
+
+    def _fin_scan(self, serveurs):
+        if not serveurs:
+            messagebox.showinfo(APP_NAME, "Aucun salon trouvé. Vérifie ton réseau local.")
+            self._ecran_demarrage()
+            return
+        self._ecran_choix_serveur(serveurs)
+
+    def _ecran_choix_serveur(self, serveurs):
+        self._reset_frame()
+        f = self.frame
+        self._titre_anime(f, "Salons LAN Découverts", C_GREEN, 16)
+        liste = tk.Listbox(f, font=(FONT, 11), bg=C_SURF2, fg=C_TEXT, selectbackground=C_BLUE)
+        for ip, port, nom, hp, v in serveurs:
+            liste.insert(tk.END, f" {nom} ({hp}) — {ip}:{port} [{v}]")
+        liste.pack(padx=30, pady=10, fill="both", expand=True)
+        liste.selection_set(0)
+
+        def connecter():
+            sel = liste.curselection()
+            if not sel: return
+            ip, port, nom, hp, v = serveurs[sel[0]]
+            self._connecter_a(ip, port)
+
+        b = tk.Button(f, text="Se connecter", command=connecter)
+        self._btn_styler(b, C_GREEN); b.pack(pady=10)
+
+    def rejoindre_ip_manuel(self):
+        ip = simpledialog.askstring("Connexion IP", "Adresse IP de l'hôte :", parent=self.root)
+        if ip: self._connecter_a(ip.strip(), TCP_PORT)
+
+    def _connecter_a(self, ip, port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(5.0)
+            s.connect((ip, port))
+            s.settimeout(None)
+            self.sock = s
+            s.sendall(make_msg("hello", pseudo=self.pseudo))
+            threading.Thread(target=self._boucle_reception, daemon=True).start()
+            self._on_connecte()
+        except OSError as e:
+            messagebox.showerror(APP_NAME, f"Impossible de se connecter : {e}")
+            self._ecran_demarrage()
+
+    def _boucle_reception(self):
+        def on_line(m):
+            t = m.get("type")
+            if t == "msg":
+                self.ui_queue.put(("msg", m.get("pseudo", "?"), m.get("text", "")))
+            elif t == "sys":
+                self.ui_queue.put(("sys", m.get("text", "")))
+            elif t == "salons_init":
+                self.ui_queue.put(("salons_init", m.get("salons", [])))
+            elif t == "salon_cree":
+                self.ui_queue.put(("salon_cree", m.get("nom", ""), m.get("type_salon", "texte"), m.get("desc", "")))
+        recv_lines(self.sock, on_line)
+        self.ui_queue.put(("err", "Connexion perdue avec le serveur."))
+
+    def _on_connecte(self):
+        self._construire_interface_chat()
+        self.afficher_systeme("Connecté au serveur !")
+
+    def _echec_connexion(self, msg):
+        messagebox.showerror(APP_NAME, msg)
+        self._ecran_demarrage()
+
+    # --- Interface de Chat ---
+    def _construire_interface_chat(self):
+        self._reset_frame()
+        f = self.frame
+
+        # Barre supérieure
+        barre = tk.Frame(f, bg=C_SURF2, height=40)
+        barre.pack(fill="x")
+        tk.Label(barre, text=f"💬 {APP_NAME}", font=(FONT, 12, "bold"), fg=C_BLUE, bg=C_SURF2).pack(side="left", padx=10)
+        self.lbl_statut = tk.Label(barre, text="", font=(FONT, 9), fg=C_SUB, bg=C_SURF2)
+        self.lbl_statut.pack(side="right", padx=10)
+
+        # Corps principal
+        corps = tk.Frame(f, bg=C_BG)
+        corps.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Panneau latéral salons
+        panneau_g = tk.Frame(corps, bg=C_BG2, width=160)
+        panneau_g.pack(side="left", fill="y", padx=(0, 5))
+        panneau_g.pack_propagate(False)
+
+        tk.Label(panneau_g, text="📁 SALONS", font=(FONT, 9, "bold"), fg=C_SUB, bg=C_BG2).pack(anchor="w", padx=8, pady=5)
+        self.liste_salons_frame = tk.Frame(panneau_g, bg=C_BG2)
+        self.liste_salons_frame.pack(fill="x")
+        self._rafraichir_liste_salons()
+
+        if self.mode == "host":
+            btn_new = tk.Button(panneau_g, text="➕ Nouveau salon", font=(FONT, 8), command=self._creer_salon)
+            self._btn_styler(btn_new, C_GREEN)
+            btn_new.pack(fill="x", padx=5, pady=10)
+
+        # Zone du chat
+        cadre_chat = tk.Frame(corps, bg=C_BG)
+        cadre_chat.pack(side="left", fill="both", expand=True)
+
+        self.lbl_salon_courant = tk.Label(cadre_chat, text=f"#{self.salon_courant}", font=(FONT, 12, "bold"), fg=C_BLUE, bg=C_BG)
+        self.lbl_salon_courant.pack(anchor="w", pady=(0, 5))
+
+        self.zone_texte = tk.Text(cadre_chat, font=(FONT, 10), bg=C_BG2, fg=C_TEXT, relief="flat", bd=0, state="disabled", wrap="word")
+        self.zone_texte.pack(fill="both", expand=True, pady=(0, 5))
+
+        # Zone d'envoi & émojis
+        cadre_saisie = tk.Frame(cadre_chat, bg=C_BG)
+        cadre_saisie.pack(fill="x")
+
+        btn_emoji = tk.Button(cadre_saisie, text="😀", command=self._ouvrir_popover_emojis)
+        self._btn_styler(btn_emoji, C_SURF2, C_TEXT)
+        btn_emoji.pack(side="left", padx=(0, 5))
+
+        self.entree = tk.Entry(cadre_saisie)
+        self._entree_styler(self.entree)
+        self.entree.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.entree.bind("<Return>", lambda e: self.envoyer())
+
+        btn_envoyer = tk.Button(cadre_saisie, text="Envoyer", command=self.envoyer)
+        self._btn_styler(btn_envoyer, C_BLUE)
+        btn_envoyer.pack(side="right")
+
+    def _rafraichir_liste_salons(self):
+        for w in self.liste_salons_frame.winfo_children(): w.destroy()
+        for s in self.salons:
+            nom = s["nom"]
+            btn = tk.Button(self.liste_salons_frame, text=f"# {nom}", font=(FONT, 9), anchor="w",
+                            bg=C_SURF2 if nom == self.salon_courant else C_BG2,
+                            fg=C_BLUE if nom == self.salon_courant else C_TEXT,
+                            relief="flat", command=lambda n=nom: self._changer_salon(n))
+            btn.pack(fill="x", pady=1, padx=2)
+
+    def _changer_salon(self, nom):
+        self.salon_courant = nom
+        self.lbl_salon_courant.config(text=f"#{nom}")
+        self._rafraichir_liste_salons()
+
+    def _creer_salon(self):
+        nom = simpledialog.askstring("Nouveau Salon", "Nom du salon :", parent=self.root)
+        if nom:
+            nom = nom.strip().lower().replace(" ", "-")
+            if not any(s["nom"] == nom for s in self.salons):
+                data = make_msg("salon_cree", nom=nom, type_salon="texte", desc="")
+                if self.mode == "host":
+                    self.salons.append({"nom": nom, "type": "texte", "desc": ""})
+                    self._rafraichir_liste_salons()
+                    self._diffuser(data)
+                elif self.sock:
+                    try: self.sock.sendall(data)
+                    except OSError: pass
+
+    def _on_salon_cree(self, nom, typ, desc):
+        if not any(s["nom"] == nom for s in self.salons):
+            self.salons.append({"nom": nom, "type": typ, "desc": desc})
+            self._rafraichir_liste_salons()
+
+    def _init_salons(self, salons):
+        if salons:
+            self.salons = salons
+            self._rafraichir_liste_salons()
+
+    def _ouvrir_popover_emojis(self):
+        win = tk.Toplevel(self.root)
+        win.title("Émojis")
+        win.geometry("280x200")
+        win.configure(bg=C_BG)
+
+        for cat, emojis in EMOJIS.items():
+            f = tk.Frame(win, bg=C_BG)
+            f.pack(fill="x", pady=2)
+            for em in emojis[:8]:
+                b = tk.Button(f, text=em, font=(FONT, 10), bg=C_SURF2, relief="flat",
+                              command=lambda e=em: (self.entree.insert(tk.END, e), win.destroy()))
+                b.pack(side="left", padx=1)
+
+    # --- Actions d'envoi & Commandes Utiles ---
+    def envoyer(self):
+        if not hasattr(self, "entree") or not self.entree.winfo_exists(): return
+        texte = self.entree.get().strip()
+        if not texte: return
+        self.entree.delete(0, tk.END)
+
+        # Traitement des commandes utiles (/help, /clear, /shrug, /tableflip)
+        if texte == "/clear":
+            self.zone_texte.config(state="normal")
+            self.zone_texte.delete("1.0", tk.END)
+            self.zone_texte.config(state="disabled")
+            return
+        elif texte == "/help":
+            self.afficher_systeme("Commandes disponibles : /clear (effacer l'écran), /shrug, /tableflip, /help")
+            return
+        elif texte == "/shrug":
+            texte = r"¯\_(ツ)_/¯"
+        elif texte == "/tableflip":
+            texte = "(╯°□°)╯︵ ┻━┻"
+
+        if len(texte) > 500: texte = texte[:500]
+
+        # 1. Affichage Local
+        try:
+            self.afficher_message(self.pseudo, texte)
+        except Exception as e:
+            log.warning(f"Affichage local échec: {e}")
+
+        # 2. Diffusion Réseau
+        try:
+            data = make_msg("msg", pseudo=self.pseudo, text=texte, salon=self.salon_courant)
+            if self.mode == "host":
+                self._diffuser(data)
+            elif self.mode == "client" and self.sock:
+                self.sock.sendall(data)
+        except OSError:
+            self.afficher_erreur("Erreur réseau : message non transmis.")
+
+        # 3. Gain d'XP & Sons
+        try:
+            self._gagner_xp(2, coins=1, msgs=1)
+            son_envoi(self.compte)
+        except Exception: pass
+
+    def afficher_message(self, pseudo, texte):
+        if not hasattr(self, "zone_texte"): return
+        self.zone_texte.config(state="normal")
+        col = couleur_hex(self.compte["equip"]["couleur"]) if pseudo == self.pseudo else C_BLUE
+        tag_pseudo = f"p_{pseudo}_{time.time()}"
+        self.zone_texte.tag_config(tag_pseudo, foreground=col, font=(FONT, 10, "bold"))
+        self.zone_texte.insert(tk.END, f"[{time.strftime('%H:%M')}] ")
+        self.zone_texte.insert(tk.END, f"{pseudo}: ", tag_pseudo)
+        self.zone_texte.insert(tk.END, f"{texte}\n")
+        self.zone_texte.see(tk.END)
+        self.zone_texte.config(state="disabled")
+
+    def afficher_systeme(self, txt):
+        if not hasattr(self, "zone_texte"): return
+        self.zone_texte.config(state="normal")
+        self.zone_texte.insert(tk.END, f"ℹ️ {txt}\n")
+        self.zone_texte.see(tk.END)
+        self.zone_texte.config(state="disabled")
+
+    def afficher_erreur(self, txt):
+        if not hasattr(self, "zone_texte"): return
+        self.zone_texte.config(state="normal")
+        self.zone_texte.insert(tk.END, f"⚠️ Erreur: {txt}\n")
+        self.zone_texte.see(tk.END)
+        self.zone_texte.config(state="disabled")
+
+    def _gagner_xp(self, xp, coins=0, msgs=0):
+        if not self.compte: return
+        self.compte["xp"] += xp
+        self.compte["coins"] += coins
+        self.compte["msgs"] += msgs
+        self.gc.sauver()
+
+    def _maj_profil(self, prof):
+        if prof.get("pseudo") in self.profils:
+            self.profils[prof["pseudo"]].update(prof)
+
+    # --- Boutique ---
+    def ouvrir_boutique(self):
+        win = tk.Toplevel(self.root)
+        win.title("🛍️ Boutique LANChat")
+        win.geometry("450x500")
+        win.configure(bg=C_BG)
+
+        tk.Label(win, text=f"Solde : {self.compte['coins']} 🪙", font=(FONT, 12, "bold"), fg=C_YELLOW, bg=C_BG).pack(pady=10)
+
+        nbook = ttk.Notebook(win)
+        nbook.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Onglet Couleurs
+        f_coul = tk.Frame(nbook, bg=C_BG)
+        nbook.add(f_coul, text="Couleurs")
+        for cid, item in COULEURS.items():
+            if cid == "defaut": continue
+            f = tk.Frame(f_coul, bg=C_SURF2, pady=3)
+            f.pack(fill="x", padx=5, pady=2)
+            tk.Label(f, text=item["nom"], fg=item["hex"], bg=C_SURF2, font=(FONT, 10, "bold")).pack(side="left", padx=5)
+            b = tk.Button(f, text=f"Acheter ({item['prix']} 🪙)",
+                          command=lambda c=cid, p=item['prix']: self._acheter_item("couleurs", c, p, win))
+            self._btn_styler(b, C_GREEN)
+            b.pack(side="right", padx=5)
+
+    def _acheter_item(self, categorie, item_id, prix, win):
+        if self.compte["coins"] < prix:
+            messagebox.showwarning("Boutique", "Pas assez de pièces !")
+            return
+        if item_id in self.compte["possede"].get(categorie, []):
+            messagebox.showinfo("Boutique", "Déjà possédé !")
+            return
+        self.compte["coins"] -= prix
+        self.compte["possede"].setdefault(categorie, []).append(item_id)
+        self.gc.sauver()
+        messagebox.showinfo("Boutique", "Achat effectué avec succès !")
+        win.destroy()
+
+# --- Point d'Entrée Principal ---
+if __name__ == "__main__":
+    try:
+        root = tk.Tk()
+        app = LANChatApp(root)
+        root.mainloop()
+    except Exception as e:
+        log.critical(f"Crash application : {e}")
